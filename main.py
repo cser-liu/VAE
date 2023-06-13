@@ -3,7 +3,7 @@
 
 import torch
 from torchvision import transforms
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torch.autograd import Variable
 from torch import optim
 import os
@@ -12,34 +12,8 @@ import argparse
 from model.vae import vae
 from data import dogDataset
 from loss import vae_loss
-
-def train(model, train_loader, optimizer, epoch, batch_size):
-    model.train()
-
-    train_loss = 0
-    count = 0
-
-    for batch_id, data in enumerate(train_loader):
-        #print(data.size())
-        x = data
-        count += x.size(0)
-        x = Variable(x.type(torch.FloatTensor).cuda())
+from visualize import showImage
         
-        optimizer.zero_grad()
-        x_new, z_mu, z_sigma = model(x)
-        #x_new = x_new.detach()
-        loss = vae_loss(x, x_new, z_mu, z_sigma, batch_size)
-        train_loss += loss
-
-        loss.backward()
-        optimizer.step()
-
-        if batch_id % 50 ==0:
-            print('Train Epoch: {} \tLoss: {:.6f}'.format(
-                epoch, loss))
-            
-        train_loss /= count
-        print('\nTrain set: Average loss: {:.4f}'.format(train_loss))
 
 def main():
     parser = argparse.ArgumentParser()
@@ -63,25 +37,91 @@ def main():
     random_transforms = [transforms.RandomRotation(degrees=10)]
     transformer2 = transforms.Compose([transforms.RandomHorizontalFlip(p=0.5),
                                     transforms.RandomApply(random_transforms, p=0.3), 
-                                    transforms.ToTensor(),
-                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+                                    transforms.ToTensor()
+                                    ])
 
-    train_dataset = dogDataset('/scratch/liudan/personal/dogs_dataset/Images', transformer1, transformer2)
+    dog_dataset = dogDataset('/scratch/liudan/personal/dogs_dataset/Images', transformer1, transformer2)
+    train_size = int(0.8*len(dog_dataset))
+    val_size = len(dog_dataset) - train_size
+    train_dataset, val_dataset = random_split(dog_dataset, [train_size, val_size])
     train_loader = DataLoader(dataset=train_dataset,
                             batch_size=arg.batch_size,
                             shuffle=True,
                             num_workers=4)
-    print("succesfully load data!")
+    val_loader = DataLoader(dataset=val_dataset,
+                            batch_size=arg.batch_size,
+                            shuffle=True,
+                            num_workers=4)
+    print('train_dataset has {} images, val_dataset has {} images.'.format(len(train_dataset), len(val_dataset)))
+    #showImage(train_dataset[0].permute(1,2,0))
+    #print("succesfully load data!")
 
-    z_dim = 20
-    model = vae(z_dim, arg.samples, arg.batch_size)
+    z_dim = 128
+    model = vae(z_dim, arg.samples)
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=.001)
 
     print("Start training!")
+
+    train_losses = []
+    valid_losses = []
+
+    best_loss = 1e9
+    best_epoch = 0
+
     for epoch_i in range(arg.epoch):
-        train(model, train_loader, optimizer, epoch_i+1, arg.batch_size)
+        print(f"Epoch {epoch_i}")
+        model.train()
+
+        train_loss = 0
+        #count = 0
+
+        for idx, x in enumerate(train_loader):
+            #print(x.size())
+            batch = x.size(0)
+            #count += batch
+            x = Variable(x.type(torch.FloatTensor).cuda())
+
+            x_new, z_mu, z_sigma = model(x)
+
+            batch_size = z_mu.size(0)
+            BCE, KLD = vae_loss(x, x_new, z_mu, z_sigma, batch_size)
+            loss = BCE+KLD
+            train_loss += loss.item()
+            loss = loss/batch
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            if idx % 100 ==0:
+                print(f"Training loss {loss: .3f} \t Recon {BCE/batch: .3f} \t KL {KLD/batch: .3f} in Step {idx}")
+            
+        train_losses.append(train_loss/len(train_dataset))
+
+        valid_loss = 0
+    
+        model.eval()
+        with torch.no_grad():
+            for idx, x in enumerate(val_loader):
+                x = Variable(x.type(torch.FloatTensor).cuda())
+                x_new, z_mu, z_sigma = model(x)
+
+                batch_size = z_mu.size(0)
+                BCE, KLD = vae_loss(x, x_new, z_mu, z_sigma, batch_size)
+                loss = BCE+KLD
+                valid_loss += loss.item()
+
+            valid_losses.append(valid_loss/len(val_dataset))
+            if valid_loss < best_loss:
+                best_loss = valid_loss
+                best_epoch = epoch_i
+
+                torch.save(model.state_dict(), 'output/new/best_model')
+                print("Model saved")
+
+    print("Training complete!")
 
 if __name__=="__main__":
     main()

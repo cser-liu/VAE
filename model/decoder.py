@@ -4,16 +4,17 @@ decoder of vae
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class decoder(nn.Module):
     """
     input : batchsize x samples x z_dim
     output: batchsize x 3 x 64 x 64 
     """
-    def __init__(self, out_channels=3, z_dim=20, samples=20, batch_size=32):
+    def __init__(self, out_channels=3, z_dim=20, samples=20):
         super(decoder, self).__init__()
         self.out_channels = out_channels
-        self.batch_size = batch_size
+        #self.batch_size = batch_size
         self.samples = samples
         self.z_dim = z_dim
 
@@ -27,6 +28,8 @@ class decoder(nn.Module):
         self.fc4 = nn.Linear(3*32*32, 3*64*64)
 
         self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+        #self.softmax = F.softmax()
 
 
     def forward(self, x):
@@ -35,17 +38,17 @@ class decoder(nn.Module):
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
 
-        x = x.view(self.batch_size, 128, 16, 16)  #bs x 128 x 16 x 16
+        x = x.view(-1, 128, 16, 16)  #bs x 128 x 16 x 16
 
         x = self.relu(self.conv1(x))
         #print(x.size())
         x = self.relu(self.conv2(x))
         #print(x.size())
 
-        x = x.view(self.batch_size, 3*16*16)
+        x = x.view(-1, 3*16*16)
 
         x = self.relu(self.fc3(x))
-        x = self.relu(self.fc4(x))
+        x = F.softmax(self.fc4(x), dim=1)
 
         #x = x.view(self.batch_size, 3, 64, 64)
 

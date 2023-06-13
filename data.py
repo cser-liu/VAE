@@ -16,7 +16,7 @@ class dogDataset(Dataset):
         for type in self.image_types:
             type_path = os.path.join(image_dir, type)
             for name in os.listdir(type_path):
-                img = Image.open(os.path.join(type_path, name))
+                img = Image.open(os.path.join(type_path, name)).convert('RGB')
 
                 if self.transformer1 is not None:
                     #image size : 64x64
